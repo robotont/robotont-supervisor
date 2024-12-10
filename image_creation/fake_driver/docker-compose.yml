@@ -1,0 +1,13 @@
+services:
+  robotont_fake_driver:
+    image: robotont_fake_driver
+    ports:
+      - "22:22"
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+    devices:
+      - /dev/dri:/dev/dri
+    command: ros2 launch robotont_driver fake_driver_launch.py

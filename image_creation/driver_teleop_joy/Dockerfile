@@ -1,11 +1,18 @@
 #Ubuntu 24.04 (Noble Numbat) base image
 FROM ubuntu:24.04
 
-#environment variables
-ENV LANG=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
-ENV ROS_DISTRO=jazzy
-ENV DEBIAN_FRONTEND=noninteractive
+#ARG to define build-time variables
+ARG LANG=en_US.UTF-8
+ARG LC_ALL=en_US.UTF-8
+ARG ROS_DISTRO=jazzy
+ARG DEBIAN_FRONTEND=noninteractive
+ARG ROOT_PASSWORD=defaultpassword
+
+#set ENV variables based on ARG
+ENV LANG=$LANG
+ENV LC_ALL=$LC_ALL
+ENV ROS_DISTRO=$ROS_DISTRO
+ENV DEBIAN_FRONTEND=$DEBIAN_FRONTEND
 
 #required packages and dependencies
 RUN apt update && apt install -y \
@@ -21,7 +28,7 @@ RUN apt update && apt install -y \
     nano \
     vim \
     && locale-gen en_US.UTF-8 \
-    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+    && update-locale LC_ALL=$LC_ALL LANG=$LANG
 
 #universe repository
 RUN add-apt-repository universe
@@ -55,6 +62,9 @@ RUN git clone --branch jazzy-devel https://github.com/robotont/robotont_driver.g
 #clone the jazzy-devel branch of robotont_msgs repository
 RUN git clone --branch jazzy-devel https://github.com/robotont/robotont_msgs.git
 
+#clone the jazzy-devel branch of demo_teleop repository
+RUN git clone --branch jazzy-devel-tenma https://github.com/robotont-demos/demo_teleop.git
+
 #install dependencies using rosdep
 WORKDIR /root/ros2_ws
 RUN rosdep install --from-paths src -y --ignore-src
@@ -68,7 +78,7 @@ RUN echo "source /opt/ros/$ROS_DISTRO/setup.bash" >> /root/.bashrc && \
 
 #setup SSH
 RUN mkdir /var/run/sshd \
-    && echo 'root:robotont' | chpasswd \
+    && echo "root:$ROOT_PASSWORD" | chpasswd \
     && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config \
     && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
 

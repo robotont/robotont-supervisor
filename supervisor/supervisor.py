@@ -1,101 +1,143 @@
-"""
-following code is from https://github.com/ut-ims-robotics/sakk-thesis-2024-robotont-firmware-menu/blob/main/scripts/serialhandler.py
-and changed to suit the application here.
-"""
 import os
-import select
 import pty
 import serial
 import subprocess
 import threading
 import time
+import select
+from dotenv import load_dotenv
+import docker
+from flask import Flask, request, jsonify
 
-TIMEOUT_10_MS = 0.01  #timeout for serial operations
+#load environment variables from .env file
+load_dotenv()
 
-def filter_data(raw_data):
+#initialize the Docker client
+docker_client = docker.from_env()
+
+#flask app
+app = Flask(__name__)
+
+#get variables from the .env file
+CMD_PREFIX = os.getenv("CMD_PREFIX", "CMD")
+TIMEOUT_10_MS = float(os.getenv("TIMEOUT_10_MS", 0.01))
+BAUD_RATE = int(os.getenv("BAUD_RATE", 115200))
+DEVICE_PATH = os.getenv("DEVICE_PATH", "/dev/ttyUSB0")
+PTY_INFO_FILE = os.getenv("PTY_INFO_FILE", "/tmp/supervisor_pty")
+
+def list_containers():
     """
-    Filters the incoming data. If it starts with "CMD", execute the command.
-    Otherwise, pass the data through.
+    List all containers with the 'robotont_' prefix.
     """
-    raw_data = raw_data.strip()
-    if raw_data.startswith("CMD"):
-        try:
-            #extract and run the command
-            command = raw_data[4:]
-            output = subprocess.check_output(command, shell=True, text=True)
-            print(f"Command Output: {output.strip()}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error executing command: {e}")
-        return None
-    elif raw_data == "":
-        return None
-    else:
-        return raw_data
+    pass
+    
+def start_container(container_name):
+    """
+    Start a container by name.
+    """
+    pass
+    
+def stop_container(container_name):
+    """
+    Stop a container by name.
+    """
+    pass
 
 
-def serial_communication_tont(master, slave, device_path):
-    try:
-        with serial.Serial(port=device_path, baudrate=115200, timeout=TIMEOUT_10_MS) as ser_tont:
-            while True:
-                #read incoming data from the physical serial device
-                try:
-                    raw_data = ser_tont.readline().decode("utf-8", errors="ignore")
-                    print(f"From USB0: {raw_data.strip()}")  #debugging incoming data
-                    filtered_data = filter_data(raw_data)
-                    if filtered_data:
-                        print(f"Filtered Data: {filtered_data}")  #debugging filtered data
-                        os.write(master, (filtered_data + "\n").encode())
-                except Exception as e:
-                    print(f"Error reading from device: {e}")
+def execute_command(command):
+    """
+    Executes a shell command and returns the output or error message.
+    """
+    pass
 
-                #read outgoing data from the PTY
-                try:
-                    if select.select([master], [], [], 0.1)[0]:
-                        outgoing_data = os.read(master, 1024)
-                        print(f"Outgoing to USB0: {outgoing_data.decode(errors='ignore')}")  #debug outgoing data
-                        ser_tont.write(outgoing_data)
-                except Exception as e:
-                    print(f"Error writing to device: {e}")
-    except serial.SerialException as e:
-        print(f"Failed to open serial port {device_path}: {e}")
+def filter_and_process_data(raw_data):
+    """
+    Filters incoming data. Executes commands prefixed with CMD.
+    """
+    pass
 
+
+def serial_to_pty(serial_device, master_fd):
+    """
+    Reads data from the serial device, filters it, and writes to the PTY.
+    """
+    pass
+
+def pty_to_serial(master_fd, serial_device):
+    """
+    Reads data from the PTY and forwards it to the serial device.
+    """
+    pass
+
+def write_pty_info(slave_name):
+    """
+    Writes the PTY slave name to a file for reuse by other scripts.
+    """
+    pass
+
+def cleanup_resources(master_fd, slave_fd):
+    """
+    Cleans up file descriptors and the PTY info file.
+    """
+    pass
+
+@app.route("/containers", methods=["GET"])
+def get_containers():
+    """
+    List all containers with the 'robotont_' prefix.
+    """
+    pass
+
+@app.route("/containers/start", methods=["POST"])
+def start_container_route():
+    """
+    Start a container by name.
+    """
+    pass
+
+@app.route("/containers/stop", methods=["POST"])
+def stop_container_route():
+    """
+    Stop a container by name.
+    """
+    pass
+
+def run_web_interface():
+    """
+    Start the Flask web server.
+    """
+    app.run(host="0.0.0.0", port=5000)
 
 def main():
-    #create a pseudo-terminal pair
-    master, slave = pty.openpty()
-    pty_slave_name = os.ttyname(slave)
-    print(f"Created PTY - Master: {os.ttyname(master)}, Slave: {pty_slave_name}")
+    #create a PTY pair
+    master_fd, slave_fd = pty.openpty()
+    slave_name = os.ttyname(slave_fd)
+    print(f"PTY created - Master: {os.ttyname(master_fd)}, Slave: {slave_name}")
 
-    #create a symlink for the slave PTY
-    symlink_robotont = "/tmp/robotont"
+    #write PTY info to file
+    write_pty_info(slave_name)
+
+    #start Flask web server in a separate thread
+    web_thread = threading.Thread(target=run_web_interface, daemon=True)
+    web_thread.start()
+
+    #open the physical serial device
     try:
-        if os.path.islink(symlink_robotont) or os.path.exists(symlink_robotont):
-            os.remove(symlink_robotont)
-        os.symlink(pty_slave_name, symlink_robotont)
-        print(f"Symlink created: {symlink_robotont} -> {pty_slave_name}")
-    except OSError as e:
-        print(f"Error creating symlink: {e}")
-        return
+        with serial.Serial(port=DEVICE_PATH, baudrate=BAUD_RATE, timeout=TIMEOUT_10_MS) as serial_device:
+            #start threads for bidirectional communication
+            serial_to_pty_thread = threading.Thread(target=serial_to_pty, args=(serial_device, master_fd), daemon=True)
+            pty_to_serial_thread = threading.Thread(target=pty_to_serial, args=(master_fd, serial_device), daemon=True)
 
-    #start serial communication with the physical device
-    device_path = "/dev/ttyUSB0"  #ADJUST IF NEEDED
-    tont_thread = threading.Thread(target=serial_communication_tont, args=(master, slave, device_path))
-    tont_thread.daemon = True
-    tont_thread.start()
+            serial_to_pty_thread.start()
+            pty_to_serial_thread.start()
 
-    try:
-        #main loop to keep the PTY open
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("Terminating...")
+            #keep the main thread alive
+            while True:
+                time.sleep(1)
+    except serial.SerialException as e:
+        print(f"Error opening serial port {DEVICE_PATH}: {e}")
     finally:
-        os.close(master)
-        os.close(slave)
-        if os.path.exists(symlink_robotont):
-            os.remove(symlink_robotont)
-        print("Cleaned up resources.")
-
+        cleanup_resources(master_fd, slave_fd)
 
 if __name__ == "__main__":
     main()
