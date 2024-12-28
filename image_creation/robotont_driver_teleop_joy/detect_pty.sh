@@ -9,12 +9,16 @@ if [ -z "$PTY" ] || [ ! -e "$PTY" ]; then
     exit 1
 fi
 
-#update docker-compose.override.yml with the detected PTY
-cat > docker-compose.override.yml <<EOF
+
+#use the override file path from the environment variable, or default to current behavior
+OVERRIDE_FILE=${OVERRIDE_FILE:-docker-compose.override.yml}
+
+#update the docker-compose.override.yml with the detected PTY
+cat > "$OVERRIDE_FILE" <<EOF
 services:
   ros2_robotont_driver:
     volumes:
       - "${PTY}:/dev/ttyACM0"
 EOF
 
-echo "Updated docker-compose.override.yml with PTY: ${PTY}"
+echo "Updated ${OVERRIDE_FILE} with PTY: ${PTY}"

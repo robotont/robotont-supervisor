@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supervisor Web GUI</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Supervisor Web GUI</h1>
+        </header>
+
+        <section>
+            <button id="list-containers" class="btn">List Containers</button>
+            <div id="output" class="output-box">
+                <table id="container-table" class="table">
+                    <thead>
+                        <tr>
+                            <th>Service</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section>
+            <h2>Start a Container</h2>
+            <div class="container-controls">
+                <select id="start-container-select">
+                    <option value="robotont_driver">robotont_driver</option>
+                    <option value="robotont_driver_teleop_joy">robotont_driver_teleop_joy</option>
+                    <option value="robotont_fake_driver">robotont_fake_driver</option>
+                </select>
+                <button id="start-container" class="btn">Start</button>
+            </div>
+        </section>
+
+        <section>
+            <h2>Stop a Container</h2>
+            <div class="container-controls">
+                <select id="stop-container-select">
+                    <option value="robotont_driver">robotont_driver</option>
+                    <option value="robotont_driver_teleop_joy">robotont_driver_teleop_joy</option>
+                    <option value="robotont_fake_driver">robotont_fake_driver</option>
+                </select>
+                <button id="stop-container" class="btn">Stop</button>
+            </div>
+        </section>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
