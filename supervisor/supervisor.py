@@ -58,7 +58,7 @@ def run_detect_pty(script_path, override_dir):
 CMD_PREFIX = os.getenv("CMD_PREFIX", "CMD")
 TIMEOUT_10_MS = float(os.getenv("TIMEOUT_10_MS", 0.01))
 BAUD_RATE = int(os.getenv("BAUD_RATE", 115200))
-DEVICE_PATH = os.getenv("DEVICE_PATH", "/dev/ttyUSB0")
+DEVICE_PATH = os.getenv("DEVICE_PATH", "/dev/ttyACM0")
 PTY_INFO_FILE = os.getenv("PTY_INFO_FILE", "/tmp/supervisor_pty")
 BASE_DIR = os.getenv("BASE_DIR", ".")
 COMPOSE_FILES = discover_compose_files(BASE_DIR)
@@ -104,7 +104,7 @@ def list_containers(compose_file_path):
         result = subprocess.check_output(
             ["docker", "compose", "-f", compose_file_path, "ps"], text=True
         )
-        print(result)
+        print("testlist")
         return result
     except subprocess.CalledProcessError as e:
         return f"Error listing containers: {e}"
@@ -171,13 +171,16 @@ def filter_and_process_data(raw_data):
     """
     raw_data = raw_data.strip()
     if raw_data.startswith(CMD_PREFIX):
+        print(raw_data)
         command = raw_data[len(CMD_PREFIX):].strip()
         parts = command.split()
         if len(parts) < 1:
             return "Invalid command."
+            print("invalid command received")
         
         cmd = parts[0]
         if cmd == "list":
+            print("serial-list-filterandprocessdata")
             containers = {service: list_containers(compose_file) for service, compose_file in COMPOSE_FILES.items()}
             return "\n".join([f"{service}: {containers}" for service, containers in containers.items()])
         elif cmd == "start" and len(parts) > 1:
@@ -205,7 +208,7 @@ def serial_to_pty(serial_device, master_fd):
         try:
             raw_data = serial_device.readline().decode("utf-8", errors="ignore")
             if raw_data.strip():  #avoid empty lines
-                print(f"Received from device: {raw_data.strip()}")
+                #print(f"Received from device: {raw_data.strip()}")
                 filtered_data = filter_and_process_data(raw_data)
                 if filtered_data:
                     os.write(master_fd, (filtered_data + "\n").encode())
@@ -222,7 +225,7 @@ def pty_to_serial(master_fd, serial_device):
             if select.select([master_fd], [], [], TIMEOUT_10_MS)[0]:
                 pty_data = os.read(master_fd, 1024)
                 if pty_data.strip():  #avoid sending empty data
-                    print(f"Forwarding to device: {pty_data.decode(errors='ignore')}")
+                   #print(f"Forwarding to device: {pty_data.decode(errors='ignore')}")
                     serial_device.write(pty_data)
         except Exception as e:
             print(f"Error in PTY-to-serial communication: {e}")

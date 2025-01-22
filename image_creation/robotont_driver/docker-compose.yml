@@ -1,9 +1,9 @@
 services:
   robotont_driver:
     image: robotont_driver
-    ports:
-      - "22:22"
+#    ports:
+#      - "22:22"
     volumes:
       #bind mount the pseudo-terminal into the container (name can change dynamically - run detect_pty.sh)
       - "/dev/pts/4:/dev/ttyACM0"
-    command: ros2 launch robotont_driver driver_launch.py device_name:='/dev/ttyACM0'
+    command: ros2 launch robotont_driver driver_launch.py device_name:='/dev/ttyUSB0'
