@@ -1,8 +1,8 @@
 services:
   robotont_fake_driver:
     image: robotont_fake_driver
-    ports:
-      - "22:22"
+#    ports:
+#      - "22:22"
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
     environment:

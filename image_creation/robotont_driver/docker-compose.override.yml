@@ -1,4 +1,4 @@
 services:
   ros2_robotont_driver:
     volumes:
-      - "/dev/pts/0:/dev/ttyACM0"
+      - "/dev/pts/8:/dev/ttyACM0"
