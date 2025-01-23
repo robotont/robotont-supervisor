@@ -239,7 +239,7 @@ def filter_and_process_data(raw_data):
     if raw_data.startswith(CMD_PREFIX):
         print(f"Received command line: {raw_data}")
         # Remove "CMD:"
-        command = raw_data[len(CMD_PREFIX)+1:].strip()  # e.g. "stop all_containers"
+        command = raw_data[len(CMD_PREFIX):].strip()  # e.g. "stop all_containers"
         print(command)
         parts = command.split()  # e.g. ["stop", "all_containers"]
         print(parts)
