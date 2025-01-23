@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 import docker
 from flask import Flask, request, jsonify, render_template
 
+# ------------------------------------------------------------------------------
+# Load environment variables
+# ------------------------------------------------------------------------------
+
 #load environment variables from .env file
 load_dotenv()
 
@@ -54,6 +58,11 @@ def run_detect_pty(script_path, override_dir):
         print(f"Error running detect_pty.sh: {e}")
         return None
 
+
+# ------------------------------------------------------------------------------
+# Configuration from .env
+# ------------------------------------------------------------------------------
+
 #get variables from the .env file
 CMD_PREFIX = os.getenv("CMD_PREFIX", "CMD")
 TIMEOUT_10_MS = float(os.getenv("TIMEOUT_10_MS", 0.01))
@@ -63,6 +72,11 @@ PTY_INFO_FILE = os.getenv("PTY_INFO_FILE", "/tmp/supervisor_pty")
 BASE_DIR = os.getenv("BASE_DIR", ".")
 COMPOSE_FILES = discover_compose_files(BASE_DIR)
 
+
+# ------------------------------------------------------------------------------
+# Global state
+# ------------------------------------------------------------------------------
+
 #state to track the serial connection
 serial_connected = threading.Event()
 serial_device = None
@@ -70,31 +84,53 @@ serial_device = None
 #global shutdown event
 shutdown_event = threading.Event()
 
+
+# ------------------------------------------------------------------------------
+# Monitor thread: handles (re)connecting the serial device
+# ------------------------------------------------------------------------------
+
 def monitor_serial_connection(master_fd):
-    """
-    Monitor the availability of the serial device and reconnect if necessary.
-    """
     global serial_device
     while not shutdown_event.is_set():
         try:
+            #if we have no device or device not open, try to reconnect
             if serial_device is None or not serial_device.is_open:
                 print(f"Attempting to connect to serial device at {DEVICE_PATH}...")
-                serial_device = serial.Serial(port=DEVICE_PATH, baudrate=BAUD_RATE, timeout=TIMEOUT_10_MS)
+                serial_device = serial.Serial(
+                    port=DEVICE_PATH,
+                    baudrate=BAUD_RATE,
+                    timeout=TIMEOUT_10_MS
+                )
                 serial_connected.set()
                 print(f"Connected to serial device at {DEVICE_PATH}")
-                #start communication threads
-                serial_to_pty_thread = threading.Thread(target=serial_to_pty, args=(serial_device, master_fd), daemon=True)
-                pty_to_serial_thread = threading.Thread(target=pty_to_serial, args=(master_fd, serial_device), daemon=True)
+
+                #start bridging threads
+                serial_to_pty_thread = threading.Thread(
+                    target=serial_to_pty,
+                    args=(serial_device, master_fd),
+                    daemon=True
+                )
+                pty_to_serial_thread = threading.Thread(
+                    target=pty_to_serial,
+                    args=(master_fd, serial_device),
+                    daemon=True
+                )
                 serial_to_pty_thread.start()
                 pty_to_serial_thread.start()
+
+            time.sleep(1)  #check connection status roughly once per second
+
         except serial.SerialException:
-            print(f"Serial device {DEVICE_PATH} not available. Retrying in 30 seconds...")
+            print(f"Serial device {DEVICE_PATH} not available. Retrying in 5 seconds...")
             serial_connected.clear()
-            time.sleep(30)
+            time.sleep(5)
         except Exception as e:
             print(f"Error in monitor_serial_connection: {e}")
-            time.sleep(30)
+            time.sleep(5)
 
+# ------------------------------------------------------------------------------
+# Docker-compose helper functions
+# ------------------------------------------------------------------------------
 
 def list_containers(compose_file_path):
     """
@@ -104,7 +140,7 @@ def list_containers(compose_file_path):
         result = subprocess.check_output(
             ["docker", "compose", "-f", compose_file_path, "ps"], text=True
         )
-        print("testlist")
+        print(result)
         return result
     except subprocess.CalledProcessError as e:
         return f"Error listing containers: {e}"
@@ -164,6 +200,9 @@ def execute_command(command):
         print(f"Command execution failed: {e}")
         return f"Error: {e}"
 
+# ------------------------------------------------------------------------------
+# Data processing
+# ------------------------------------------------------------------------------
 
 def filter_and_process_data(raw_data):
     """
@@ -171,19 +210,24 @@ def filter_and_process_data(raw_data):
     """
     raw_data = raw_data.strip()
     if raw_data.startswith(CMD_PREFIX):
-        print(raw_data)
+        print("CMD received: "+raw_data)
         command = raw_data[len(CMD_PREFIX):].strip()
         parts = command.split()
         if len(parts) < 1:
             return "Invalid command."
-            print("invalid command received")
         
         cmd = parts[0]
         if cmd == "list":
-            print("serial-list-filterandprocessdata")
-            containers = {service: list_containers(compose_file) for service, compose_file in COMPOSE_FILES.items()}
-            return "\n".join([f"{service}: {containers}" for service, containers in containers.items()])
+            containers = {
+                service: list_containers(compose_file)
+                for service, compose_file in COMPOSE_FILES.items()
+            }
+            return "\n".join([
+                f"{service}: {containers_out}"
+                for service, containers_out in containers.items()
+            ])
         elif cmd == "start" and len(parts) > 1:
+            print("CMD START")
             service_name = parts[1]
             compose_file = COMPOSE_FILES.get(service_name)
             if not compose_file:
@@ -199,62 +243,92 @@ def filter_and_process_data(raw_data):
             return f"Unknown command: {cmd}"
     return raw_data if raw_data else None
 
+# ------------------------------------------------------------------------------
+# Bridging threads (Serial <-> PTY)
+# ------------------------------------------------------------------------------
 
-def serial_to_pty(serial_device, master_fd):
+def serial_to_pty(serial_dev, master_fd):
     """
     Reads data from the serial device, filters it, and writes to the PTY.
+    Uses a buffer to handle partial lines.
     """
+    buffer = ""
     while not shutdown_event.is_set():
+        # If the device is closed externally, stop
+        if not serial_dev.is_open:
+            break
         try:
-            raw_data = serial_device.readline().decode("utf-8", errors="ignore")
-            if raw_data.strip():  #avoid empty lines
-                #print(f"Received from device: {raw_data.strip()}")
-                filtered_data = filter_and_process_data(raw_data)
-                if filtered_data:
-                    os.write(master_fd, (filtered_data + "\n").encode())
-        except Exception as e:
-            print(f"Error in serial-to-PTY communication: {e}")
-            time.sleep(1)
+            raw_bytes = serial_dev.read(1024)
+            if not raw_bytes:
+                # No data; avoid busy loop
+                time.sleep(0.01)
+                continue
 
-def pty_to_serial(master_fd, serial_device):
+            buffer += raw_bytes.decode("utf-8", errors="ignore")
+
+            # Split on newlines
+            lines = buffer.split('\n')
+            # Process all complete lines
+            for line in lines[:-1]:
+                line = line.strip('\r')
+                line = line.strip()
+                if line:
+                    filtered_data = filter_and_process_data(line)
+                    if filtered_data:
+                        os.write(master_fd, (filtered_data + "\n").encode())
+
+            # The last part might be a partial line
+            buffer = lines[-1]
+
+        except serial.SerialException as e:
+            print(f"[serial_to_pty] Serial device error: {e}")
+            # Close the device so monitor_serial_connection can reconnect
+            try:
+                serial_dev.close()
+            except:
+                pass
+            break
+        except OSError as e:
+            # e.g. if master_fd is closed
+            print(f"[serial_to_pty] OSError: {e}")
+            time.sleep(0.5)
+            break
+        except Exception as e:
+            print(f"[serial_to_pty] Unexpected error: {e}")
+            time.sleep(0.5)
+
+def pty_to_serial(master_fd, serial_dev):
     """
     Reads data from the PTY and forwards it to the serial device.
     """
     while not shutdown_event.is_set():
+        if not serial_dev.is_open:
+            break
         try:
-            if select.select([master_fd], [], [], TIMEOUT_10_MS)[0]:
+            # Check if PTY has data
+            rlist, _, _ = select.select([master_fd], [], [], 0.01)
+            if rlist:
                 pty_data = os.read(master_fd, 1024)
-                if pty_data.strip():  #avoid sending empty data
-                   #print(f"Forwarding to device: {pty_data.decode(errors='ignore')}")
-                    serial_device.write(pty_data)
+                if pty_data.strip():  # ignore empty data
+                    serial_dev.write(pty_data)
+        except serial.SerialException as e:
+            print(f"[pty_to_serial] Serial device error: {e}")
+            try:
+                serial_dev.close()
+            except:
+                pass
+            break
+        except OSError as e:
+            print(f"[pty_to_serial] OSError: {e}")
+            time.sleep(0.5)
+            break
         except Exception as e:
-            print(f"Error in PTY-to-serial communication: {e}")
-            time.sleep(1)
+            print(f"[pty_to_serial] Unexpected error: {e}")
+            time.sleep(0.5)
 
-def write_pty_info(slave_name):
-    """
-    Writes the PTY slave name to a file for reuse by other scripts.
-    """
-    try:
-        with open(PTY_INFO_FILE, "w") as f:
-            f.write(slave_name)
-        print(f"PTY info written to {PTY_INFO_FILE}")
-    except OSError as e:
-        print(f"Failed to write PTY info: {e}")
-
-
-def cleanup_resources(master_fd, slave_fd):
-    """
-    Cleans up file descriptors and the PTY info file.
-    """
-    try:
-        os.close(master_fd)
-        os.close(slave_fd)
-        if os.path.exists(PTY_INFO_FILE):
-            os.remove(PTY_INFO_FILE)
-        print("Cleaned up resources.")
-    except Exception as e:
-        print(f"Error during cleanup: {e}")
+# ------------------------------------------------------------------------------
+# Flask routes
+# ------------------------------------------------------------------------------
 
 @app.route("/")
 def home():
@@ -315,6 +389,39 @@ def run_web_interface():
     Start the Flask web server.
     """
     app.run(host="0.0.0.0", port=5000)
+
+# ------------------------------------------------------------------------------
+# PTY info handling
+# ------------------------------------------------------------------------------
+
+def write_pty_info(slave_name):
+    """
+    Writes the PTY slave name to a file for reuse by other scripts.
+    """
+    try:
+        with open(PTY_INFO_FILE, "w") as f:
+            f.write(slave_name)
+        print(f"PTY info written to {PTY_INFO_FILE}")
+    except OSError as e:
+        print(f"Failed to write PTY info: {e}")
+
+
+def cleanup_resources(master_fd, slave_fd):
+    """
+    Cleans up file descriptors and the PTY info file.
+    """
+    try:
+        os.close(master_fd)
+        os.close(slave_fd)
+        if os.path.exists(PTY_INFO_FILE):
+            os.remove(PTY_INFO_FILE)
+        print("Cleaned up resources.")
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+
+# ------------------------------------------------------------------------------
+# Main
+# ------------------------------------------------------------------------------
 
 def main():
     #create a PTY pair
