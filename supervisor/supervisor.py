@@ -64,7 +64,7 @@ def run_detect_pty(script_path, override_dir):
 # ------------------------------------------------------------------------------
 
 #get variables from the .env file
-CMD_PREFIX = os.getenv("CMD_PREFIX", "CMD")
+CMD_PREFIX = os.getenv("CMD_PREFIX", "CMD:")
 TIMEOUT_10_MS = float(os.getenv("TIMEOUT_10_MS", 0.01))
 BAUD_RATE = int(os.getenv("BAUD_RATE", 115200))
 DEVICE_PATH = os.getenv("DEVICE_PATH", "/dev/ttyACM0")
@@ -145,6 +145,26 @@ def list_containers(compose_file_path):
     except subprocess.CalledProcessError as e:
         return f"Error listing containers: {e}"
     
+def stop_all_containers():
+    """
+    Stop all known containers from all discovered docker-compose files.
+    """
+    results = []
+    for service_name, compose_file in COMPOSE_FILES.items():
+        try:
+            subprocess.check_output(
+                ["docker", "compose", "-f", compose_file, "stop", service_name],
+                text=True
+            )
+            msg = f"Service '{service_name}' stopped."
+            print(msg)
+            results.append(msg)
+        except subprocess.CalledProcessError as e:
+            err = f"Error stopping service {service_name}: {e}"
+            print(err)
+            results.append(err)
+    return "\n".join(results)
+    
 def start_container(service_name, compose_file_path):
     """
     Start a container service by name using the specified docker-compose file.
@@ -168,8 +188,9 @@ def start_container(service_name, compose_file_path):
             env=env,
             text=True,
         )
-        print(f"Service {service_name} started.")
-        return f"Service {service_name} started."
+        msg = f"Service '{service_name}' started."
+        print(msg)
+        return msg
     except subprocess.CalledProcessError as e:
         return f"Error starting service {service_name}: {e}"
 
@@ -182,8 +203,9 @@ def stop_container(service_name, compose_file_path):
         result = subprocess.check_output(
             ["docker", "compose", "-f", compose_file_path, "stop", service_name], text=True
         )
-        print(f"Service {service_name} stopped.")
-        return f"Service {service_name} stopped."
+        msg = f"Service '{service_name}' stopped."
+        print(msg)
+        return msg
     except subprocess.CalledProcessError as e:
         return f"Error stopping service {service_name}: {e}"
 
@@ -206,42 +228,55 @@ def execute_command(command):
 
 def filter_and_process_data(raw_data):
     """
-    Filters incoming data. Executes commands prefixed with CMD.
+    Filters incoming data. Executes commands in the format:
+        CMD:stop all_containers
+        CMD:start robotont_driver
+        ...
     """
     raw_data = raw_data.strip()
+
+    # Only act if the line starts with "CMD:"
     if raw_data.startswith(CMD_PREFIX):
-        print("CMD received: "+raw_data)
-        command = raw_data[len(CMD_PREFIX):].strip()
-        parts = command.split()
-        if len(parts) < 1:
+        print(f"Received command line: {raw_data}")
+        # Remove "CMD:"
+        command = raw_data[len(CMD_PREFIX)+1:].strip()  # e.g. "stop all_containers"
+        print(command)
+        parts = command.split()  # e.g. ["stop", "all_containers"]
+        print(parts)
+
+        if not parts:
             return "Invalid command."
-        
-        cmd = parts[0]
-        if cmd == "list":
-            containers = {
-                service: list_containers(compose_file)
-                for service, compose_file in COMPOSE_FILES.items()
-            }
-            return "\n".join([
-                f"{service}: {containers_out}"
-                for service, containers_out in containers.items()
-            ])
-        elif cmd == "start" and len(parts) > 1:
-            print("CMD START")
-            service_name = parts[1]
-            compose_file = COMPOSE_FILES.get(service_name)
-            if not compose_file:
-                return f"Service {service_name} not found."
-            return start_container(service_name, compose_file)
+
+        cmd = parts[0]  # e.g. "stop"
+
+        # "stop all_containers" => stop everything
+        if cmd == "stop" and len(parts) > 1 and parts[1] == "all_containers":
+            return stop_all_containers()
+
+        # "stop <something>"
         elif cmd == "stop" and len(parts) > 1:
             service_name = parts[1]
             compose_file = COMPOSE_FILES.get(service_name)
             if not compose_file:
-                return f"Service {service_name} not found."
+                return f"Service '{service_name}' not found in COMPOSE_FILES."
             return stop_container(service_name, compose_file)
+
+        # "start <something>"
+        elif cmd == "start" and len(parts) > 1:
+            service_name = parts[1]
+            compose_file = COMPOSE_FILES.get(service_name)
+            print("LOL")
+            if not compose_file:
+                return f"Service '{service_name}' not found in COMPOSE_FILES."
+            return start_container(service_name, compose_file)
+
+        # If no recognized command
         else:
-            return f"Unknown command: {cmd}"
+            return f"Unknown command: {command}"
+
+    # Otherwise just return the raw_data if you want to forward it to the PTY
     return raw_data if raw_data else None
+
 
 # ------------------------------------------------------------------------------
 # Bridging threads (Serial <-> PTY)
