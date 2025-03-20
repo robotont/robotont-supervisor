@@ -64,7 +64,7 @@ def run_detect_pty(script_path, override_dir):
 # ------------------------------------------------------------------------------
 
 #get variables from the .env file
-CMD_PREFIX = os.getenv("CMD_PREFIX", "CMD:")
+CMD_PREFIX = os.getenv("CMD_PREFIX", "SC:")
 TIMEOUT_10_MS = float(os.getenv("TIMEOUT_10_MS", 0.01))
 BAUD_RATE = int(os.getenv("BAUD_RATE", 115200))
 DEVICE_PATH = os.getenv("DEVICE_PATH", "/dev/ttyACM0")
@@ -103,6 +103,9 @@ def monitor_serial_connection(master_fd):
                 )
                 serial_connected.set()
                 print(f"Connected to serial device at {DEVICE_PATH}")
+
+                #send container list to firmware
+                send_container_list_to_firmware()
 
                 #start bridging threads
                 serial_to_pty_thread = threading.Thread(
@@ -225,6 +228,19 @@ def execute_command(command):
 # ------------------------------------------------------------------------------
 # Data processing
 # ------------------------------------------------------------------------------
+def send_container_list_to_firmware():
+    """
+    Sends the list of available container names (from COMPOSE_FILES keys)
+    to the firmware in the format:
+    CMD:containers <name1>:<name2>:<name3>\r\n
+    """
+    if serial_device and serial_device.is_open:
+        container_names = list(COMPOSE_FILES.keys())
+        formatted = ":".join(container_names)
+        command = f"{CMD_PREFIX}containers {formatted}\r\n"
+        serial_device.write(command.encode())
+        print(f"Sent container list to firmware: {command.strip()}")
+
 
 def filter_and_process_data(raw_data):
     """
@@ -234,7 +250,7 @@ def filter_and_process_data(raw_data):
         ...
     """
     raw_data = raw_data.strip()
-
+    print(raw_data)
     # Only act if the line starts with "CMD:"
     if raw_data.startswith(CMD_PREFIX):
         print(f"Received command line: {raw_data}")
