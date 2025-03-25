@@ -6,6 +6,7 @@ import threading
 import time
 import select
 import glob
+import fcntl
 from dotenv import load_dotenv
 import docker
 from flask import Flask, request, jsonify, render_template
@@ -67,7 +68,7 @@ def run_detect_pty(script_path, override_dir):
 CMD_PREFIX = os.getenv("CMD_PREFIX", "SC:")
 TIMEOUT_10_MS = float(os.getenv("TIMEOUT_10_MS", 0.01))
 BAUD_RATE = int(os.getenv("BAUD_RATE", 115200))
-DEVICE_PATH = os.getenv("DEVICE_PATH", "/dev/ttyACM0")
+DEVICE_PATH = os.getenv("DEVICE_PATH", "/dev/ttyACM1")
 PTY_INFO_FILE = os.getenv("PTY_INFO_FILE", "/tmp/supervisor_pty")
 BASE_DIR = os.getenv("BASE_DIR", ".")
 COMPOSE_FILES = discover_compose_files(BASE_DIR)
@@ -250,7 +251,7 @@ def filter_and_process_data(raw_data):
         ...
     """
     raw_data = raw_data.strip()
-    print(raw_data)
+    #print(raw_data)
     # Only act if the line starts with "CMD:"
     if raw_data.startswith(CMD_PREFIX):
         print(f"Received command line: {raw_data}")
@@ -298,6 +299,11 @@ def filter_and_process_data(raw_data):
 # Bridging threads (Serial <-> PTY)
 # ------------------------------------------------------------------------------
 
+def make_fd_nonblocking(fd):
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+
 def serial_to_pty(serial_dev, master_fd):
     """
     Reads data from the serial device, filters it, and writes to the PTY.
@@ -326,7 +332,12 @@ def serial_to_pty(serial_dev, master_fd):
                 if line:
                     filtered_data = filter_and_process_data(line)
                     if filtered_data:
-                        os.write(master_fd, (filtered_data + "\n").encode())
+                        #os.write(master_fd, (filtered_data + "\n").encode())
+                        try:
+                            os.write(master_fd, (filtered_data + "\n").encode())
+                        except BlockingIOError:
+                            #print("[serial_to_pty] Warning: PTY buffer full, discarding output.")
+                            pass
 
             # The last part might be a partial line
             buffer = lines[-1]
@@ -479,6 +490,8 @@ def main():
     master_fd, slave_fd = pty.openpty()
     slave_name = os.ttyname(slave_fd)
     print(f"PTY created - Master: {os.ttyname(master_fd)}, Slave: {slave_name}")
+
+    make_fd_nonblocking(master_fd)
 
     #write PTY info to file
     write_pty_info(slave_name)
