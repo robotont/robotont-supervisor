@@ -287,6 +287,13 @@ def filter_and_process_data(raw_data):
                 return f"Service '{service_name}' not found in COMPOSE_FILES."
             return start_container(service_name, compose_file)
 
+        elif cmd == "request_containers":
+            container_names = list(COMPOSE_FILES.keys())
+            formatted = ":".join(container_names)
+            command = f"{CMD_PREFIX}containers {formatted}\r\n"
+            serial_device.write(command.encode())
+            return
+
         # If no recognized command
         else:
             return f"Unknown command: {command}"
