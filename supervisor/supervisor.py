@@ -68,7 +68,7 @@ def run_detect_pty(script_path, override_dir):
 CMD_PREFIX = os.getenv("CMD_PREFIX", "SC:")
 TIMEOUT_10_MS = float(os.getenv("TIMEOUT_10_MS", 0.01))
 BAUD_RATE = int(os.getenv("BAUD_RATE", 115200))
-DEVICE_PATH = os.getenv("DEVICE_PATH", "/dev/ttyACM1")
+DEVICE_PATH = os.getenv("DEVICE_PATH", "/dev/ttyACM0")
 PTY_INFO_FILE = os.getenv("PTY_INFO_FILE", "/tmp/supervisor_pty")
 BASE_DIR = os.getenv("BASE_DIR", ".")
 COMPOSE_FILES = discover_compose_files(BASE_DIR)
@@ -333,10 +333,11 @@ def serial_to_pty(serial_dev, master_fd):
                     filtered_data = filter_and_process_data(line)
                     if filtered_data:
                         #os.write(master_fd, (filtered_data + "\n").encode())
+                        #print(f"[TO CONTAINER] {filtered_data}")
                         try:
                             os.write(master_fd, (filtered_data + "\n").encode())
                         except BlockingIOError:
-                            #print("[serial_to_pty] Warning: PTY buffer full, discarding output.")
+                            print("[serial_to_pty] Warning: PTY buffer full, discarding output.")
                             pass
 
             # The last part might be a partial line
@@ -372,6 +373,7 @@ def pty_to_serial(master_fd, serial_dev):
             if rlist:
                 pty_data = os.read(master_fd, 1024)
                 if pty_data.strip():  # ignore empty data
+                    #print(f"[FROM CONTAINER] {pty_data.decode(errors='ignore').strip()}")
                     serial_dev.write(pty_data)
         except serial.SerialException as e:
             print(f"[pty_to_serial] Serial device error: {e}")
