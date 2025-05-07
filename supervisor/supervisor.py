@@ -87,6 +87,21 @@ shutdown_event = threading.Event()
 
 
 # ------------------------------------------------------------------------------
+# Helper: push status to firmware
+# ------------------------------------------------------------------------------
+
+def _send_status_to_firmware(status: str):
+    """
+    Push a one‑word status ('running' | 'stopped' | 'error') to the MCU.
+    Safe to call even when no serial connection is up.
+    """
+    if serial_device and serial_device.is_open:
+        msg = f"{CMD_PREFIX}status {status}\r\n"
+        serial_device.write(msg.encode())
+        print(f"→ firmware: {msg.strip()}")
+
+
+# ------------------------------------------------------------------------------
 # Monitor thread: handles (re)connecting the serial device
 # ------------------------------------------------------------------------------
 
@@ -186,7 +201,7 @@ def start_container(service_name, compose_file_path):
         env = os.environ.copy()
         if detected_pty:
             env["DETECTED_PTY"] = detected_pty  #set detected PTY as an environment variable
-
+        _send_status_to_firmware("starting")
         result = subprocess.check_output(
             ["docker", "compose", "-f", compose_file_path, "up", "-d", service_name],
             env=env,
@@ -194,8 +209,10 @@ def start_container(service_name, compose_file_path):
         )
         msg = f"Service '{service_name}' started."
         print(msg)
+        _send_status_to_firmware("running")
         return msg
     except subprocess.CalledProcessError as e:
+        _send_status_to_firmware("error")
         return f"Error starting service {service_name}: {e}"
 
     
@@ -204,15 +221,49 @@ def stop_container(service_name, compose_file_path):
     Stop a container service by name using the specified docker-compose file.
     """
     try:
+        _send_status_to_firmware("stopping")
         result = subprocess.check_output(
             ["docker", "compose", "-f", compose_file_path, "stop", service_name], text=True
         )
         msg = f"Service '{service_name}' stopped."
         print(msg)
+        _send_status_to_firmware("stopped")
         return msg
     except subprocess.CalledProcessError as e:
+        _send_status_to_firmware("error")
         return f"Error stopping service {service_name}: {e}"
 
+
+def get_container_status(service_name, compose_file_path):
+    """
+    Return a short textual status for <service_name> in the given compose file:
+    'running', 'stopped' or 'error'.
+    """
+    try:
+        # `docker compose ps` lists *only* the containers that belong to this compose project
+        # We ask twice: first for running, then for anything else.  Fast and robust.
+
+        running = subprocess.check_output(
+            ["docker", "compose", "-f", compose_file_path,
+             "ps", "--services", "--filter", "status=running"],
+            text=True,
+        ).split()
+
+        if service_name in running:
+            return "running"
+
+        defined = subprocess.check_output(
+            ["docker", "compose", "-f", compose_file_path,
+             "config", "--services"],
+            text=True,
+        ).split()
+
+        if service_name in defined:
+            return "stopped"
+
+        return "error"
+    except subprocess.CalledProcessError:
+        return "error"
 
 def execute_command(command):
     """
@@ -229,6 +280,46 @@ def execute_command(command):
 # ------------------------------------------------------------------------------
 # Data processing
 # ------------------------------------------------------------------------------
+def handle_status_request(service_name):
+    """
+    Return container status of <service_name> in the format:
+      "SC:status <service_name>: <running|stopped|unknown>"
+    """
+    compose_file = COMPOSE_FILES.get(service_name)
+    if not compose_file:
+        return f"{CMD_PREFIX}status {service_name}: not found"
+
+    try:
+        # Use docker compose to check the container
+        result = subprocess.check_output(
+            ["docker", "compose", "-f", compose_file, "ps", service_name],
+            text=True
+        )
+        # 'result' is the output of "docker compose ps <service_name>"
+        # Typically something like:
+        #   Name          Command        State    Ports
+        #   ------------------------------------------------
+        #   some_name     "bash"         Up
+
+        if "Up" in result:
+            status_str = "running"
+        elif "Exit" in result or "Down" in result:
+            status_str = "stopped"
+        else:
+            status_str = "unknown"
+        
+        message = f"{CMD_PREFIX}status {service_name}: {status_str}"
+        print(message)
+        serial_device.write(message.encode())
+        return
+
+    except subprocess.CalledProcessError as e:
+        # If container doesn't exist, or ps fails
+        message = f"{CMD_PREFIX}status {service_name}: error {e}"
+        print(message)
+        serial_device.write(message.encode())
+        return
+
 def send_container_list_to_firmware():
     """
     Sends the list of available container names (from COMPOSE_FILES keys)
@@ -294,6 +385,27 @@ def filter_and_process_data(raw_data):
             serial_device.write(command.encode())
             return
 
+        elif cmd == "status" and len(parts) > 1:
+            service_name = parts[1]
+            return handle_status_request(service_name)
+
+        # "status <something>"
+        elif cmd == "status" and len(parts) > 1:
+            service_name = parts[1]
+            compose_file = COMPOSE_FILES.get(service_name)
+
+            if not compose_file:
+                reply = f"{CMD_PREFIX}status error\r\n"
+            else:
+                status = get_container_status(service_name, compose_file)
+                reply  = f"{CMD_PREFIX}status {status}\r\n"
+
+            # Send the answer back to the firmware
+            if serial_device and serial_device.is_open:
+                serial_device.write(reply.encode())
+                print(f"→ firmware: {reply.strip()}")
+            return  # we’re done – nothing to forward to the PTY
+
         # If no recognized command
         else:
             return f"Unknown command: {command}"
@@ -344,7 +456,7 @@ def serial_to_pty(serial_dev, master_fd):
                         try:
                             os.write(master_fd, (filtered_data + "\n").encode())
                         except BlockingIOError:
-                            print("[serial_to_pty] Warning: PTY buffer full, discarding output.")
+                            #print("[serial_to_pty] Warning: PTY buffer full, discarding output.")
                             pass
 
             # The last part might be a partial line
