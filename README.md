@@ -4,11 +4,9 @@
     * Connection to internet
     * Connection to local network if SSH is used.
 ## Starting supervisor from scratch:
-1) Install the Docker engine.
-https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository
+1) Install the [Docker engine using the apt repository](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository).
 
-2) Allow non-privileged users (including supervisor) to run Docker commands.
-https://docs.docker.com/engine/install/linux-postinstall/
+2) Allow non-privileged users (including supervisor) to run Docker commands. [Linux post-installation steps for Docker Engine](https://docs.docker.com/engine/install/linux-postinstall/)
 
 3) Download robotont-supervisor repository on the robot.
     ```
