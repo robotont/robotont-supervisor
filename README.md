@@ -24,18 +24,18 @@
     ```
     source supervisor-venv/bin/activate
     ```
-7) Install the requirements from requirements.txt
+7) Navigate into previosly downloaded repository and install the requirements from "requirements.txt".
     ```
     pip install -r requirements.txt
     ```
-8) Navigate into previosly downloaded repository and run supervisor.py (from virtual environment):
+8) Run supervisor.py (from virtual environment):
     ```
     python3 supervisor.py
     ```
     Optionally, you may use .env files for setting variables. The default values also work.
     
 9) Modify the SSH port on the host to allow connection to container using default SSH port 22. You may skip this step if SSH connection into container is not needed.
-    * **If you are connected via SSH, you will need to reconnect after restarting SSH server.**
+    * **If you are connected via SSH, you will need to reconnect after changing the port and restarting SSH server.**
     * Open following file with a text editor:
         ```
         sudo nano /etc/ssh/sshd_config
