@@ -1,57 +1,226 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Supervisor Web GUI</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>Supervisor Web GUI</h1>
-        </header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Supervisor</title>
+    <style>
+      :root {
+        --primary: #1abc9c;
+        --bg: #f9fafb;
+        --text: #111827;
+        --border: #e5e7eb;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding: 2rem;
+      }
 
-        <section>
-            <button id="list-containers" class="btn">List Containers</button>
-            <div id="output" class="output-box">
-                <table id="container-table" class="table">
-                    <thead>
-                        <tr>
-                            <th>Service</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-        </section>
+      .wrapper {
+        width: min(640px, 100%);
+      }
 
-        <section>
-            <h2>Start a Container</h2>
-            <div class="container-controls">
-                <select id="start-container-select">
-                    <option value="robotont_driver">robotont_driver</option>
-                    <option value="robotont_driver_teleop_joy">robotont_driver_teleop_joy</option>
-                    <option value="robotont_fake_driver">robotont_fake_driver</option>
-                </select>
-                <button id="start-container" class="btn">Start</button>
-            </div>
-        </section>
+      h1 {
+        margin: 0 0 1rem 0;
+        font-size: 1.25rem;
+        font-weight: 600;
+        text-align: center;
+      }
 
-        <section>
-            <h2>Stop a Container</h2>
-            <div class="container-controls">
-                <select id="stop-container-select">
-                    <option value="robotont_driver">robotont_driver</option>
-                    <option value="robotont_driver_teleop_joy">robotont_driver_teleop_joy</option>
-                    <option value="robotont_fake_driver">robotont_fake_driver</option>
-                </select>
-                <button id="stop-container" class="btn">Stop</button>
-            </div>
-        </section>
-    </div>
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      thead th {
+        text-align: left;
+        font-weight: 600;
+        padding: 0.75rem 0.5rem;
+        border-bottom: 2px solid var(--border);
+      }
+      tbody td {
+        padding: 0.75rem 0.5rem;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
+      tr:hover {
+        background: #f1f5f9;
+      }
 
-    <script src="/static/app.js"></script>
-</body>
+      button {
+        border: none;
+        background: var(--primary);
+        color: #fff;
+        padding: 0.4rem 0.8rem;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        font-size: 0.875rem;
+      }
+      button:hover {
+        opacity: 0.9;
+      }
+      button[disabled] {
+        opacity: 0.5;
+        cursor: default;
+      }
+
+      .status-dot {
+        display: inline-block;
+        width: 0.65rem;
+        height: 0.65rem;
+        border-radius: 50%;
+        margin-right: 0.4rem;
+      }
+      .status-running { background: var(--primary); }
+      .status-stopped { background: #9ca3af; }
+      .status-created { background: #d97706; }
+      .status-restarting { background: #d97706; }
+      .status-paused { background: #d97706; }
+      .status-error { background: #ef4444; }
+      .status-unknown { background: #6b7280; }
+
+      /* small "bug" badge for quick debugging */
+      .raw { display:none; font-size: 0.75rem; color:#6b7280; }
+      tr.debug .raw { display:block; }
+    </style>
+  </head>
+  <body>
+    <main class="wrapper">
+      <h1>Container Supervisor</h1>
+      <table id="container-table">
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </main>
+
+    <script>
+      const tbody = document.querySelector("#container-table tbody");
+      const POLL_MS = 2000;
+      const DEBUG = false; // flip to true to see raw status strings
+
+      async function fetchContainers() {
+        try {
+          const res = await fetch("/containers");
+          if (!res.ok) throw new Error("Request failed");
+          const data = await res.json();
+          if (DEBUG) console.table(data);
+          renderTable(data);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      /**
+       * Analyse docker compose ps output and return classification.
+       * Priority order: Up > Restarting > Paused > Created > Exited/Stopped > Unknown
+       */
+      function parseStatus(raw) {
+        if (!raw || typeof raw !== "string") {
+          return { label: "unknown", className: "unknown", isRunning: false };
+        }
+
+        const text = raw.toLowerCase();
+        // Use priority order to handle multi‑line / multi‑container strings
+        if (/\bup\b/.test(text)) {
+          return { label: "running", className: "running", isRunning: true };
+        }
+        if (/\brestarting\b/.test(text)) {
+          return { label: "restarting", className: "restarting", isRunning: false };
+        }
+        if (/\bpaused\b/.test(text)) {
+          return { label: "paused", className: "paused", isRunning: false };
+        }
+        if (/\bcreated\b/.test(text)) {
+          return { label: "created", className: "created", isRunning: false };
+        }
+        if (/\b(exited|exit|stopped?|down|dead)\b/.test(text)) {
+          const word = text.match(/\b(exited|exit|stopped?|down|dead)\b/)[1];
+          return { label: word, className: "stopped", isRunning: false };
+        }
+        return { label: "unknown", className: "unknown", isRunning: false };
+      }
+
+      function renderTable(data) {
+        tbody.innerHTML = "";
+        Object.entries(data).forEach(([service, rawStatus]) => {
+          const { label, className, isRunning } = parseStatus(rawStatus);
+
+          const tr = document.createElement("tr");
+          if (DEBUG) tr.classList.add("debug");
+
+          // Service name
+          const nameTd = document.createElement("td");
+          nameTd.textContent = service;
+
+          // Status cell with coloured dot
+          const statusTd = document.createElement("td");
+          const dot = document.createElement("span");
+          dot.className = "status-dot status-" + className;
+          statusTd.append(dot, label);
+          if (DEBUG) {
+            const small = document.createElement("div");
+            small.className = "raw";
+            small.textContent = rawStatus.replace(/\n/g, " | ");
+            statusTd.appendChild(small);
+          }
+
+          // Action buttons
+          const actionTd = document.createElement("td");
+          const startBtn = document.createElement("button");
+          startBtn.textContent = "Start";
+          startBtn.onclick = () => doAction("/containers/start", service);
+
+          const stopBtn = document.createElement("button");
+          stopBtn.textContent = "Stop";
+          stopBtn.onclick = () => doAction("/containers/stop", service);
+
+          // Disable according to running state
+          startBtn.disabled = isRunning;
+          stopBtn.disabled = !isRunning;
+
+          actionTd.append(startBtn, " ", stopBtn);
+
+          tr.append(nameTd, statusTd, actionTd);
+          tbody.append(tr);
+        });
+      }
+
+      async function doAction(endpoint, service) {
+        try {
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: service }),
+          });
+          const out = await res.json();
+          alert(out.message || out.error || "Done");
+          // wait a moment to allow docker to transition, then refresh
+          setTimeout(fetchContainers, 800);
+        } catch (e) {
+          alert("Error: " + e.message);
+        }
+      }
+
+      // initial fetch + polling
+      fetchContainers();
+      setInterval(fetchContainers, POLL_MS);
+    </script>
+  </body>
 </html>
