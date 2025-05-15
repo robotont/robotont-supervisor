@@ -1,11 +1,11 @@
 services:
   robotont_driver_teleop_joy:
     image: robotont_driver_teleop_joy
-#    ports:
-#      - "22:22"
+    ports:
+      - "22:22"
     devices:
       - "/dev/input/js0:/dev/input/js0"
     volumes:
-      #bind mount the pseudo-terminal into the container (name can change dynamically - run detect_pty.sh)
+      #placeholder for pseudoterminal path - run detect_pty.sh
       - "/dev/pts/1:/dev/ttyACM0"
     command: ros2 launch robotont_driver driver_launch.py device_name:='/dev/ttyACM0'
