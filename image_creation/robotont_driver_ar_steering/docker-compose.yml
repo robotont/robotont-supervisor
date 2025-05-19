@@ -1,0 +1,12 @@
+services:
+  robotont_driver_ar_steering:
+    image: robotont_driver_ar_steering
+    privileged: true
+    ports:
+      - "22:22"
+    devices:
+    - "/dev/video0:/dev/video0"
+    volumes:
+      #placeholder for pseudoterminal path - run detect_pty.sh
+      - "/dev/pts/1:/dev/ttyACM0"
+    command: roslaunch robotont_driver driver_basic.launch
