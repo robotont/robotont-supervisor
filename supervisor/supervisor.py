@@ -77,6 +77,9 @@ COMPOSE_FILES = discover_compose_files(BASE_DIR)
 # ------------------------------------------------------------------------------
 # Global state
 # ------------------------------------------------------------------------------
+MAX_USB_PAYLOAD = 48              # 64 − len("SC:containers ") − 2  (CRLF)
+serial_tx_lock  = threading.Lock()
+
 
 #state to track the serial connection
 serial_connected = threading.Event()
@@ -84,6 +87,20 @@ serial_device = None
 
 #global shutdown event
 shutdown_event = threading.Event()
+
+
+# ------------------------------------------------------------------------------
+# Thread-safe write helper – all supervisor traffic to the MCU goes through
+# this function so messages can never be mixed together.
+# ------------------------------------------------------------------------------
+def _tx_to_firmware(msg: str):
+    """
+    Atomically send <msg> (already CR-LF terminated) to the MCU.
+    """
+    if serial_device and serial_device.is_open:
+        with serial_tx_lock:              # one writer at a time
+            serial_device.write(msg.encode())
+        print(f"→ firmware: {msg.strip()}")
 
 
 # ------------------------------------------------------------------------------
@@ -97,8 +114,7 @@ def _send_status_to_firmware(status: str):
     """
     if serial_device and serial_device.is_open:
         msg = f"{CMD_PREFIX}status {status}\r\n"
-        serial_device.write(msg.encode())
-        print(f"→ firmware: {msg.strip()}")
+        _tx_to_firmware(msg)
 
 
 # ------------------------------------------------------------------------------
@@ -245,8 +261,6 @@ def get_container_status(service_name, compose_file_path):
     'running', 'stopped' or 'error'.
     """
     try:
-        # `docker compose ps` lists *only* the containers that belong to this compose project
-        # We ask twice: first for running, then for anything else.  Fast and robust.
 
         running = subprocess.check_output(
             ["docker", "compose", "-f", compose_file_path,
@@ -285,58 +299,30 @@ def execute_command(command):
 # ------------------------------------------------------------------------------
 # Data processing
 # ------------------------------------------------------------------------------
-def handle_status_request(service_name):
-    """
-    Return container status of <service_name> in the format:
-      "SC:status <service_name>: <running|stopped|unknown>"
-    """
-    compose_file = COMPOSE_FILES.get(service_name)
-    if not compose_file:
-        return f"{CMD_PREFIX}status {service_name}: not found"
-
-    try:
-        # Use docker compose to check the container
-        result = subprocess.check_output(
-            ["docker", "compose", "-f", compose_file, "ps", service_name],
-            text=True
-        )
-        # 'result' is the output of "docker compose ps <service_name>"
-        # Typically something like:
-        #   Name          Command        State    Ports
-        #   ------------------------------------------------
-        #   some_name     "bash"         Up
-
-        if "Up" in result:
-            status_str = "running"
-        elif "Exit" in result or "Down" in result:
-            status_str = "stopped"
-        else:
-            status_str = "unknown"
-        
-        message = f"{CMD_PREFIX}status {service_name}: {status_str}"
-        print(message)
-        serial_device.write(message.encode())
-        return
-
-    except subprocess.CalledProcessError as e:
-        # If container doesn't exist, or ps fails
-        message = f"{CMD_PREFIX}status {service_name}: error {e}"
-        print(message)
-        serial_device.write(message.encode())
-        return
-
 def send_container_list_to_firmware():
     """
-    Sends the list of available container names (from COMPOSE_FILES keys)
-    to the firmware in the format:
-    CMD:containers <name1>:<name2>:<name3>\r\n
+    Streams the list of compose projects to the MCU in chunks that never exceed
+    one 64-byte USB frame, so the firmware always receives complete lines.
     """
-    if serial_device and serial_device.is_open:
-        container_names = list(COMPOSE_FILES.keys())
-        formatted = ":".join(container_names)
-        command = f"{CMD_PREFIX}containers {formatted}\r\n"
-        serial_device.write(command.encode())
-        print(f"Sent container list to firmware: {command.strip()}")
+    if not (serial_device and serial_device.is_open):
+        return
+
+    prefix    = f"{CMD_PREFIX}containers "
+    remaining = ":".join(COMPOSE_FILES.keys())
+
+    while remaining:
+        take = MAX_USB_PAYLOAD
+        if len(remaining) > take:
+            cut = remaining.rfind(":", 0, take)
+            if cut == -1:
+                cut = take
+            chunk, remaining = remaining[:cut], remaining[cut + 1:]
+        else:
+            chunk, remaining = remaining, ""
+
+        _tx_to_firmware(f"{prefix}{chunk}\r\n")
+    print("Sent container list to firmware (chunked)")
+
 
 
 def filter_and_process_data(raw_data):
@@ -378,38 +364,17 @@ def filter_and_process_data(raw_data):
         elif cmd == "start" and len(parts) > 1:
             service_name = parts[1]
             compose_file = COMPOSE_FILES.get(service_name)
-            print("LOL")
             if not compose_file:
                 return f"Service '{service_name}' not found in COMPOSE_FILES."
             return start_container(service_name, compose_file)
 
         elif cmd == "request_containers":
-            container_names = list(COMPOSE_FILES.keys())
-            formatted = ":".join(container_names)
-            command = f"{CMD_PREFIX}containers {formatted}\r\n"
-            serial_device.write(command.encode())
+            send_container_list_to_firmware()
             return
-
+            
         elif cmd == "status" and len(parts) > 1:
             service_name = parts[1]
             return handle_status_request(service_name)
-
-        # "status <something>"
-        elif cmd == "status" and len(parts) > 1:
-            service_name = parts[1]
-            compose_file = COMPOSE_FILES.get(service_name)
-
-            if not compose_file:
-                reply = f"{CMD_PREFIX}status error\r\n"
-            else:
-                status = get_container_status(service_name, compose_file)
-                reply  = f"{CMD_PREFIX}status {status}\r\n"
-
-            # Send the answer back to the firmware
-            if serial_device and serial_device.is_open:
-                serial_device.write(reply.encode())
-                print(f"→ firmware: {reply.strip()}")
-            return  # we’re done – nothing to forward to the PTY
 
         # If no recognized command
         else:
@@ -498,7 +463,8 @@ def pty_to_serial(master_fd, serial_dev):
                 pty_data = os.read(master_fd, 1024)
                 if pty_data.strip():  # ignore empty data
                     #print(f"[FROM CONTAINER] {pty_data.decode(errors='ignore').strip()}")
-                    serial_dev.write(pty_data)
+                    with serial_tx_lock:
+                        serial_dev.write(pty_data)
         except serial.SerialException as e:
             print(f"[pty_to_serial] Serial device error: {e}")
             try:
