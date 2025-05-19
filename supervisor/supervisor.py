@@ -189,6 +189,11 @@ def start_container(service_name, compose_file_path):
     Start a container service by name using the specified docker-compose file.
     Before starting, run detect_pty.sh if it exists in the service's directory.
     """
+    _send_status_to_firmware("stopping")
+    stop_all_containers()
+    _send_status_to_firmware("stopped")
+
+
     service_dir = os.path.dirname(compose_file_path)
     detect_pty_script = os.path.join(service_dir, "detect_pty.sh")
     detected_pty = None
@@ -527,20 +532,8 @@ def get_containers():
     """
     results = {}
     for service, compose_file in COMPOSE_FILES.items():
-        results[service] = list_containers(compose_file)
+        results[service] = get_container_status(service, compose_file)
     return jsonify(results)
-
-@app.route("/containers/<service>", methods=["GET"])
-def get_service_containers(service):
-    """
-    List containers for a specific service.
-    """
-    compose_file = COMPOSE_FILES.get(service)
-    if not compose_file:
-        return jsonify({"error": f"Service '{service}' not found"}), 404
-    result = list_containers(compose_file)
-    return jsonify({service: result})
-
 
 @app.route("/containers/start", methods=["POST"])
 def start_container_route():
