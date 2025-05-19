@@ -515,6 +515,8 @@ def start_container_route():
     if not service_name or not compose_file:
         return jsonify({"error": f"Invalid service name: {service_name}"}), 400
     result = start_container(service_name, compose_file)
+    if result.startswith("Error"):
+        return jsonify({"error": result}), 500
     return jsonify({"message": result})
 
 @app.route("/containers/stop", methods=["POST"])
@@ -527,6 +529,8 @@ def stop_container_route():
     if not service_name or not compose_file:
         return jsonify({"error": f"Invalid service name: {service_name}"}), 400
     result = stop_container(service_name, compose_file)
+    if result.startswith("Error"):
+        return jsonify({"error": result}), 500
     return jsonify({"message": result})
     
 
