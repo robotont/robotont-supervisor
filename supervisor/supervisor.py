@@ -273,26 +273,33 @@ def get_container_status(service_name, compose_file_path):
     'running', 'stopped' or 'error'.
     """
     try:
-
-        running = subprocess.check_output(
+        # docker compose ps -q <service>  → container ID
+        cid = subprocess.check_output(
             ["docker", "compose", "-f", compose_file_path,
-             "ps", "--services", "--filter", "status=running"],
-            text=True,
-        ).split()
+             "ps", "-q", service_name],
+            text=True).strip()
 
-        if service_name in running:
-            return "running"
+        if not cid:
+            return "stopped"          # defined but not created
 
-        defined = subprocess.check_output(
-            ["docker", "compose", "-f", compose_file_path,
-             "config", "--services"],
-            text=True,
-        ).split()
+        # docker inspect --format '{{json .State}}' <cid>
+        state_json = subprocess.check_output(
+            ["docker", "inspect", "--format", "{{json .State}}", cid],
+            text=True)
 
-        if service_name in defined:
+        state = json.loads(state_json)
+        status = state["Status"]      # running / exited / paused …
+        health = state.get("Health", {}).get("Status")
+
+        if status == "running":
+            return "running" if health in (None, "healthy") else "starting"
+        elif status in ("created", "paused"):
             return "stopped"
+        elif status == "exited":
+            return "stopped"
+        else:
+            return "error"
 
-        return "error"
     except subprocess.CalledProcessError:
         return "error"
 
