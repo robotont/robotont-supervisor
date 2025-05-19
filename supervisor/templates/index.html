@@ -109,6 +109,8 @@
             }else if(pend==='stop'){
               if(backendStatus==='stopped') pending.delete(svc);
               else status = 'stopping';
+            }else if (pend === 'error') {
+              status = 'error';
             }
             return htmlRow(svc,status);
           }).join('');
@@ -117,19 +119,29 @@
       }
 
       tbody.addEventListener('click',async e=>{
-        const btn=e.target.closest('button[data-cmd]');
-        if(!btn) return;
-        const tr=btn.closest('tr');
-        const svc=tr.dataset.service, cmd=btn.dataset.cmd;
-        pending.set(svc, cmd==='start'?'start':'stop');
+        const btn = e.target.closest('button[data-cmd]');
+        if (!btn) return;
+      
+        const tr   = btn.closest('tr');
+        const svc  = tr.dataset.service;
+        const cmd  = btn.dataset.cmd;          // "start" | "stop"
+      
+        pending.set(svc, cmd);
         render();
-        try{
-          await json(API[cmd],{
-            method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({name:svc})
+      
+        try {
+          const res = await json(API[cmd], {
+            method : 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body   : JSON.stringify({name: svc})
           });
-        }catch(err){
-          alert(err.message); pending.delete(svc); render();
+      
+        } catch (err) {
+          /* fetch rejected (HTTP 500/400) */
+          console.error(err);
+          pending.set(svc, 'error');           // red dot
+          render();
+          alert(err.message || 'Operation failed');
         }
       });
 
