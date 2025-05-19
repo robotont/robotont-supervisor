@@ -4,223 +4,137 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Supervisor</title>
+
     <style>
       :root {
         --primary: #1abc9c;
-        --bg: #f9fafb;
-        --text: #111827;
-        --border: #e5e7eb;
+        --accent:  #fbbf24;
+        --error:   #ef4444;
+        --bg:      #f9fafb;
+        --text:    #111827;
+        --border:  #e5e7eb;
       }
-      *,
-      *::before,
-      *::after {
-        box-sizing: border-box;
+      *,*::before,*::after{box-sizing:border-box}
+      body{
+        margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+        background:var(--bg); color:var(--text);
+        display:flex; justify-content:center; padding:2rem;
       }
-      body {
-        margin: 0;
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
-          Arial, sans-serif;
-        background: var(--bg);
-        color: var(--text);
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-        padding: 2rem;
-      }
+      .wrapper{width:min(680px,100%)}
+      h1{margin:0 0 1rem;font-size:1.5rem;font-weight:600;text-align:center}
 
-      .wrapper {
-        width: min(640px, 100%);
-      }
+      /* ---------- desktop table ---------- */
+      table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--border);border-radius:0.5rem;overflow:hidden}
+      thead th{padding:0.75rem;font-weight:600;text-align:left;background:#f3f4f6;border-bottom:2px solid var(--border)}
+      tbody td{padding:0.75rem;border-bottom:1px solid var(--border);vertical-align:middle}
+      tbody tr:last-child td{border-bottom:none}
+      tr:hover{background:#f1f5f9}
 
-      h1 {
-        margin: 0 0 1rem 0;
-        font-size: 1.25rem;
-        font-weight: 600;
-        text-align: center;
-      }
+      button{border:none;cursor:pointer;padding:0.4rem 0.8rem;border-radius:0.375rem;font-size:0.875rem;background:var(--primary);color:#fff;transition:opacity .15s}
+      button:hover:not([disabled]){opacity:.9}
+      button[disabled]{opacity:.5;cursor:default}
 
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      thead th {
-        text-align: left;
-        font-weight: 600;
-        padding: 0.75rem 0.5rem;
-        border-bottom: 2px solid var(--border);
-      }
-      tbody td {
-        padding: 0.75rem 0.5rem;
-        border-bottom: 1px solid var(--border);
-        vertical-align: middle;
-      }
-      tr:hover {
-        background: #f1f5f9;
-      }
+      .status-dot{display:inline-block;width:0.65rem;height:0.65rem;border-radius:50%;margin-right:0.4rem}
+      .status-running  {background:var(--primary)}
+      .status-starting,.status-stopping,.status-restarting{background:var(--accent)}
+      .status-paused,.status-created {background:#d97706}
+      .status-stopped  {background:#9ca3af}
+      .status-error    {background:var(--error)}
+      .status-unknown  {background:#6b7280}
 
-      button {
-        border: none;
-        background: var(--primary);
-        color: #fff;
-        padding: 0.4rem 0.8rem;
-        border-radius: 0.375rem;
-        cursor: pointer;
-        font-size: 0.875rem;
+      /* ---------- mobile (<640px) ---------- */
+      @media(max-width:640px){
+        body{padding:1rem}
+        table,thead,tbody,tr,td,th{display:block;width:100%}
+        thead{display:none}
+        tr{margin-bottom:1rem;border:1px solid var(--border);border-radius:0.5rem;padding:0.75rem;background:#fff}
+        td{display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0}
+        td::before{content:attr(data-label);font-weight:600;margin-right:0.5rem;flex:0 0 auto}
+        button{flex:1;margin-left:0.25rem;min-height:44px} /* tap‑friendly */
       }
-      button:hover {
-        opacity: 0.9;
-      }
-      button[disabled] {
-        opacity: 0.5;
-        cursor: default;
-      }
-
-      .status-dot {
-        display: inline-block;
-        width: 0.65rem;
-        height: 0.65rem;
-        border-radius: 50%;
-        margin-right: 0.4rem;
-      }
-      .status-running { background: var(--primary); }
-      .status-stopped { background: #9ca3af; }
-      .status-created { background: #d97706; }
-      .status-restarting { background: #d97706; }
-      .status-paused { background: #d97706; }
-      .status-error { background: #ef4444; }
-      .status-unknown { background: #6b7280; }
-
-      /* small "bug" badge for quick debugging */
-      .raw { display:none; font-size: 0.75rem; color:#6b7280; }
-      tr.debug .raw { display:block; }
     </style>
   </head>
   <body>
     <main class="wrapper">
       <h1>Container Supervisor</h1>
       <table id="container-table">
-        <thead>
-          <tr>
-            <th>Service</th>
-            <th>Status</th>
-            <th></th>
-          </tr>
-        </thead>
+        <thead><tr><th>Service</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody></tbody>
       </table>
     </main>
 
     <script>
-      const tbody = document.querySelector("#container-table tbody");
+      const API = {
+        list:'/containers',
+        start:'/containers/start',
+        stop:'/containers/stop'
+      };
       const POLL_MS = 2000;
-      const DEBUG = false; // flip to true to see raw status strings
+      const tbody   = document.querySelector('#container-table tbody');
 
-      async function fetchContainers() {
-        try {
-          const res = await fetch("/containers");
-          if (!res.ok) throw new Error("Request failed");
-          const data = await res.json();
-          if (DEBUG) console.table(data);
-          renderTable(data);
-        } catch (e) {
-          console.error(e);
-        }
+      const pending = new Map();
+
+      const STATUS = {
+        running   : {cls:'running'},   starting:{cls:'starting'},
+        stopping  : {cls:'stopping'},  restarting:{cls:'restarting'},
+        paused    : {cls:'paused'},    created  :{cls:'created'},
+        stopped   : {cls:'stopped'},   error    :{cls:'error'},
+        unknown   : {cls:'unknown'}
+      };
+
+      const json = (url,opts)=>fetch(url,opts).then(r=>r.ok?r.json():r.text().then(t=>Promise.reject(new Error(t||r.statusText))));
+
+      function htmlRow(service,status){
+        const {cls}=STATUS[status]||STATUS.unknown;
+        const isRunning = status==='running' || status==='starting';
+        return `<tr data-service="${service}">
+          <td data-label="Service">${service}</td>
+          <td data-label="Status"><span class="status-dot status-${cls}"></span>${status}</td>
+          <td data-label="Actions">
+            <button data-cmd="start" ${isRunning?'disabled':''}>Start</button>
+            <button data-cmd="stop"  ${!isRunning?'disabled':''}>Stop</button>
+          </td>
+        </tr>`;
       }
 
-      /**
-       * Analyse docker compose ps output and return classification.
-       * Priority order: Up > Restarting > Paused > Created > Exited/Stopped > Unknown
-       */
-      function parseStatus(raw) {
-        if (!raw || typeof raw !== "string") {
-          return { label: "unknown", className: "unknown", isRunning: false };
-        }
-
-        const text = raw.toLowerCase();
-        // Use priority order to handle multi‑line / multi‑container strings
-        if (/\bup\b/.test(text)) {
-          return { label: "running", className: "running", isRunning: true };
-        }
-        if (/\brestarting\b/.test(text)) {
-          return { label: "restarting", className: "restarting", isRunning: false };
-        }
-        if (/\bpaused\b/.test(text)) {
-          return { label: "paused", className: "paused", isRunning: false };
-        }
-        if (/\bcreated\b/.test(text)) {
-          return { label: "created", className: "created", isRunning: false };
-        }
-        if (/\b(exited|exit|stopped?|down|dead)\b/.test(text)) {
-          const word = text.match(/\b(exited|exit|stopped?|down|dead)\b/)[1];
-          return { label: word, className: "stopped", isRunning: false };
-        }
-        return { label: "unknown", className: "unknown", isRunning: false };
+      async function render(){
+        try{
+          const data = await json(API.list);
+          const rows = Object.entries(data).map(([svc,backendStatus])=>{
+            const pend = pending.get(svc);
+            let status = backendStatus;
+            if(pend==='start'){
+              if(backendStatus==='running') pending.delete(svc);
+              else status = 'starting';
+            }else if(pend==='stop'){
+              if(backendStatus==='stopped') pending.delete(svc);
+              else status = 'stopping';
+            }
+            return htmlRow(svc,status);
+          }).join('');
+          tbody.innerHTML = rows;
+        }catch(e){console.error(e)}
       }
 
-      function renderTable(data) {
-        tbody.innerHTML = "";
-        Object.entries(data).forEach(([service, rawStatus]) => {
-          const { label, className, isRunning } = parseStatus(rawStatus);
-
-          const tr = document.createElement("tr");
-          if (DEBUG) tr.classList.add("debug");
-
-          // Service name
-          const nameTd = document.createElement("td");
-          nameTd.textContent = service;
-
-          // Status cell with coloured dot
-          const statusTd = document.createElement("td");
-          const dot = document.createElement("span");
-          dot.className = "status-dot status-" + className;
-          statusTd.append(dot, label);
-          if (DEBUG) {
-            const small = document.createElement("div");
-            small.className = "raw";
-            small.textContent = rawStatus.replace(/\n/g, " | ");
-            statusTd.appendChild(small);
-          }
-
-          // Action buttons
-          const actionTd = document.createElement("td");
-          const startBtn = document.createElement("button");
-          startBtn.textContent = "Start";
-          startBtn.onclick = () => doAction("/containers/start", service);
-
-          const stopBtn = document.createElement("button");
-          stopBtn.textContent = "Stop";
-          stopBtn.onclick = () => doAction("/containers/stop", service);
-
-          // Disable according to running state
-          startBtn.disabled = isRunning;
-          stopBtn.disabled = !isRunning;
-
-          actionTd.append(startBtn, " ", stopBtn);
-
-          tr.append(nameTd, statusTd, actionTd);
-          tbody.append(tr);
-        });
-      }
-
-      async function doAction(endpoint, service) {
-        try {
-          const res = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: service }),
+      tbody.addEventListener('click',async e=>{
+        const btn=e.target.closest('button[data-cmd]');
+        if(!btn) return;
+        const tr=btn.closest('tr');
+        const svc=tr.dataset.service, cmd=btn.dataset.cmd;
+        pending.set(svc, cmd==='start'?'start':'stop');
+        render();
+        try{
+          await json(API[cmd],{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({name:svc})
           });
-          const out = await res.json();
-          alert(out.message || out.error || "Done");
-          // wait a moment to allow docker to transition, then refresh
-          setTimeout(fetchContainers, 800);
-        } catch (e) {
-          alert("Error: " + e.message);
+        }catch(err){
+          alert(err.message); pending.delete(svc); render();
         }
-      }
+      });
 
-      // initial fetch + polling
-      fetchContainers();
-      setInterval(fetchContainers, POLL_MS);
+      render();
+      setInterval(render, POLL_MS);
     </script>
   </body>
 </html>
