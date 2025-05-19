@@ -301,27 +301,19 @@ def execute_command(command):
 # ------------------------------------------------------------------------------
 def send_container_list_to_firmware():
     """
-    Streams the list of compose projects to the MCU in chunks that never exceed
-    one 64-byte USB frame, so the firmware always receives complete lines.
+    Sends container names one per line, preceded by 'clear'.
+    MCU gets complete messages.
     """
     if not (serial_device and serial_device.is_open):
         return
 
-    prefix    = f"{CMD_PREFIX}containers "
-    remaining = ":".join(COMPOSE_FILES.keys())
+    _tx_to_firmware(f"{CMD_PREFIX}containers clear\r\n")
 
-    while remaining:
-        take = MAX_USB_PAYLOAD
-        if len(remaining) > take:
-            cut = remaining.rfind(":", 0, take)
-            if cut == -1:
-                cut = take
-            chunk, remaining = remaining[:cut], remaining[cut + 1:]
-        else:
-            chunk, remaining = remaining, ""
+    for name in COMPOSE_FILES.keys():
+        _tx_to_firmware(f"{CMD_PREFIX}containers add {name}\r\n")
 
-        _tx_to_firmware(f"{prefix}{chunk}\r\n")
-    print("Sent container list to firmware (chunked)")
+    _tx_to_firmware(f"{CMD_PREFIX}containers done\r\n")
+    print("Sent container list to firmware (clear + add + done)")
 
 
 
