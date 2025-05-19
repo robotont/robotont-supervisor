@@ -115,7 +115,19 @@ def _send_status_to_firmware(status: str):
     if serial_device and serial_device.is_open:
         msg = f"{CMD_PREFIX}status {status}\r\n"
         _tx_to_firmware(msg)
+        
+def handle_status_request(service_name):
+    """
+    Answer the MCU with
+        SC:status <service_name>: <running|stopped|error|not found>\r\n
+    """
+    compose_file = COMPOSE_FILES.get(service_name)
+    if not compose_file:
+        _tx_to_firmware(f"{CMD_PREFIX}status {service_name}: not found\r\n")
+        return
 
+    status = get_container_status(service_name, compose_file)
+    _tx_to_firmware(f"{CMD_PREFIX}status {service_name}: {status}\r\n")
 
 # ------------------------------------------------------------------------------
 # Monitor thread: handles (re)connecting the serial device
