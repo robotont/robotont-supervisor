@@ -1,6 +1,6 @@
 services:
-  robotont_driver_ar_steering:
-    image: robotont_driver_ar_steering
+  ros1_melodic_teleop:
+    image: ros1_melodic_teleop
     privileged: true
     ports:
       - "22:22"

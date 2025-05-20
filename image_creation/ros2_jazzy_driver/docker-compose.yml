@@ -1,0 +1,9 @@
+services:
+  ros2_jazzy_driver:
+    image: ros2_jazzy_driver
+    ports:
+      - "22:22"
+    volumes:
+      #placeholder for pseudoterminal path - run detect_pty.sh
+      - "/dev/pts/1:/dev/ttyACM0"
+    command: ros2 launch robotont_driver driver_launch.py device_name:='/dev/ttyACM0'

@@ -1,6 +1,6 @@
 services:
-  robotont_driver_teleop_joy:
-    image: robotont_driver_teleop_joy
+  ros2_jazzy_teleop:
+    image: ros2_jazzy_teleop
     ports:
       - "22:22"
     devices:

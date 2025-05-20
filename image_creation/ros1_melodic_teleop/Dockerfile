@@ -58,10 +58,10 @@ RUN git clone --branch melodic-devel https://github.com/robotont/robotont_driver
 RUN git clone --branch melodic-devel https://github.com/robotont/robotont_msgs.git
 
 #clone ar steering demo
-RUN git clone --branch main https://github.com/robotont-demos/demo_ar_steering.git
+#RUN git clone --branch main https://github.com/robotont-demos/demo_ar_steering.git
 
-#install AR tracking
-RUN apt install -y ros-melodic-ar-track-alvar
+#install teleop demo
+RUN apt-get install ros-melodic-teleop-twist-keyboard
 
 # install dependencies using rosdep
 WORKDIR /root/ros_ws
