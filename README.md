@@ -17,7 +17,7 @@ Modify the SSH port on the host to allow connection to container using default S
   sudo systemctl restart ssh.service
   ```
 ## Building images
-Navigate to each directory where Dockerfile is present and build the images.
+Navigate to each directory where Dockerfile is present (inside image_creation) and build the images.
 ```
 docker build -t <name> .
 ```
