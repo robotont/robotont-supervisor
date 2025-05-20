@@ -3,7 +3,26 @@
     * Connection to Robotont mainboard via serial
     * Connection to internet
     * Connection to local network if SSH is used.
+## Changing SSH ports
+Modify the SSH port on the host to allow connection to container using default SSH port 22. You may skip this step if SSH connection into container is not needed.
+    * **If you are connected via SSH, you will need to reconnect after changing the port and restarting SSH server.**
+    * Open following file with a text editor:
+        ```
+        sudo nano /etc/ssh/sshd_config
+        ```
+    * Find and modify the port line from `#Port 22` to `Port 22222`. This frees up port 22 on host to be used by container ssh server.
+    * You may need to modify firewall settings to allow SSH connections to host machine using port 22222.
+    * Restart the SSH server.
+        ```
+        sudo systemctl restart ssh.service
+        ```
+## Building images
+Navigate to each directory where Dockerfile is present and build the images.
+    ```
+    docker build -t <name> .
+    ```
 ## Starting supervisor from scratch:
+Before staring the superivisor, make sure that port 5000 is open, otherwise it is impossible to access the web interface.
 1) Install the [Docker engine using the apt repository](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository).
 
 2) Allow non-privileged users (including supervisor) to run Docker commands. [Linux post-installation steps for Docker Engine](https://docs.docker.com/engine/install/linux-postinstall/)
@@ -34,27 +53,12 @@
     ```
     Optionally, you may use .env files for setting variables. The default values also work.
     
-9) Modify the SSH port on the host to allow connection to container using default SSH port 22. You may skip this step if SSH connection into container is not needed.
-    * **If you are connected via SSH, you will need to reconnect after changing the port and restarting SSH server.**
-    * Open following file with a text editor:
-        ```
-        sudo nano /etc/ssh/sshd_config
-        ```
-    * Find and modify the port line from `#Port 22` to `Port 22222`. This frees up port 22 on host to be used by container ssh server.
-    * You may need to modify firewall settings to allow SSH connections to host machine using port 22222.
-    * Restart the SSH server.
-        ```
-        sudo systemctl restart ssh.service
-        ```
+
 
 ## Troubleshooting:
 * If there are issues with paths, absolute paths in .env file could be a fix.
 * Serial device names can change.
     #### Useful commands
-    * build image
-         ```
-        docker build -t .
-        ```
     * sourcing ROS
         ```
         source /opt/ros/$ROS_DISTRO/setup.bash
@@ -66,5 +70,5 @@
         ```
     * open container bash
         ```
-        docker exec -it {container-name} bash
+        docker exec -it <container-name> bash
         ```
