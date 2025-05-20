@@ -7,6 +7,7 @@ import time
 import select
 import glob
 import fcntl
+import json
 from dotenv import load_dotenv
 import docker
 from flask import Flask, request, jsonify, render_template
@@ -39,8 +40,7 @@ def discover_compose_files(base_dir):
 
 def run_detect_pty(script_path, override_dir):
     """
-    Executes the detect_pty.sh script and ensures docker-compose.override.yml 
-    is created in the correct directory.
+    Executes the detect_pty.sh script
     """
     try:
         #set the override path dynamically for the script
@@ -77,7 +77,7 @@ COMPOSE_FILES = discover_compose_files(BASE_DIR)
 # ------------------------------------------------------------------------------
 # Global state
 # ------------------------------------------------------------------------------
-MAX_USB_PAYLOAD = 48              # 64 − len("SC:containers ") − 2  (CRLF)
+MAX_USB_PAYLOAD = 48
 serial_tx_lock  = threading.Lock()
 
 
@@ -90,8 +90,7 @@ shutdown_event = threading.Event()
 
 
 # ------------------------------------------------------------------------------
-# Thread-safe write helper – all supervisor traffic to the MCU goes through
-# this function so messages can never be mixed together.
+# Thread-safe write helper
 # ------------------------------------------------------------------------------
 def _tx_to_firmware(msg: str):
     """
@@ -100,7 +99,7 @@ def _tx_to_firmware(msg: str):
     if serial_device and serial_device.is_open:
         with serial_tx_lock:              # one writer at a time
             serial_device.write(msg.encode())
-        print(f"→ firmware: {msg.strip()}")
+        print(f"to firmware: {msg.strip()}")
 
 
 # ------------------------------------------------------------------------------
@@ -109,8 +108,7 @@ def _tx_to_firmware(msg: str):
 
 def _send_status_to_firmware(status: str):
     """
-    Push a one‑word status ('running' | 'stopped' | 'error') to the MCU.
-    Safe to call even when no serial connection is up.
+    Push a one‑word status to the MCU.
     """
     if serial_device and serial_device.is_open:
         msg = f"{CMD_PREFIX}status {status}\r\n"
@@ -137,7 +135,7 @@ def monitor_serial_connection(master_fd):
     global serial_device
     while not shutdown_event.is_set():
         try:
-            #if we have no device or device not open, try to reconnect
+            #if no device, try to reconnect
             if serial_device is None or not serial_device.is_open:
                 print(f"Attempting to connect to serial device at {DEVICE_PATH}...")
                 serial_device = serial.Serial(
@@ -217,10 +215,10 @@ def start_container(service_name, compose_file_path):
     Start a container service by name using the specified docker-compose file.
     Before starting, run detect_pty.sh if it exists in the service's directory.
     """
+    #need to stop everything else because PTY system supports only one writer
     _send_status_to_firmware("stopping")
     stop_all_containers()
     _send_status_to_firmware("stopped")
-
 
     service_dir = os.path.dirname(compose_file_path)
     detect_pty_script = os.path.join(service_dir, "detect_pty.sh")
@@ -269,8 +267,7 @@ def stop_container(service_name, compose_file_path):
 
 def get_container_status(service_name, compose_file_path):
     """
-    Return a short textual status for <service_name> in the given compose file:
-    'running', 'stopped' or 'error'.
+    Return a short textual status for service_name in the given compose file.
     """
     try:
         # docker compose ps -q <service>  → container ID
@@ -281,14 +278,13 @@ def get_container_status(service_name, compose_file_path):
 
         if not cid:
             return "stopped"          # defined but not created
-
-        # docker inspect --format '{{json .State}}' <cid>
+            
         state_json = subprocess.check_output(
             ["docker", "inspect", "--format", "{{json .State}}", cid],
             text=True)
 
         state = json.loads(state_json)
-        status = state["Status"]      # running / exited / paused …
+        status = state["Status"]
         health = state.get("Health", {}).get("Status")
 
         if status == "running":
@@ -320,8 +316,7 @@ def execute_command(command):
 # ------------------------------------------------------------------------------
 def send_container_list_to_firmware():
     """
-    Sends container names one per line, preceded by 'clear'.
-    MCU gets complete messages.
+    Sends container names one per line.
     """
     if not (serial_device and serial_device.is_open):
         return
@@ -338,30 +333,23 @@ def send_container_list_to_firmware():
 
 def filter_and_process_data(raw_data):
     """
-    Filters incoming data. Executes commands in the format:
-        CMD:stop all_containers
-        CMD:start robotont_driver
-        ...
+    Filters incoming data, executes commands.
     """
     raw_data = raw_data.strip()
-    #print(raw_data)
-    # Only act if the line starts with "CMD:"
+    # print(raw_data)
+    # Only act if the line starts with "SC:"
     if raw_data.startswith(CMD_PREFIX):
         print(f"Received command line: {raw_data}")
-        # Remove "CMD:"
-        command = raw_data[len(CMD_PREFIX):].strip()  # e.g. "stop all_containers"
+        # Remove "SC:"
+        command = raw_data[len(CMD_PREFIX):].strip()
         print(command)
-        parts = command.split()  # e.g. ["stop", "all_containers"]
+        parts = command.split()
         print(parts)
 
         if not parts:
             return "Invalid command."
 
         cmd = parts[0]  # e.g. "stop"
-
-        # "stop all_containers" => stop everything
-        if cmd == "stop" and len(parts) > 1 and parts[1] == "all_containers":
-            return stop_all_containers()
 
         # "stop <something>"
         elif cmd == "stop" and len(parts) > 1:
@@ -386,12 +374,10 @@ def filter_and_process_data(raw_data):
         elif cmd == "status" and len(parts) > 1:
             service_name = parts[1]
             return handle_status_request(service_name)
-
-        # If no recognized command
         else:
             return f"Unknown command: {command}"
 
-    # Otherwise just return the raw_data if you want to forward it to the PTY
+    # Otherwise return the raw_data and forward it to the PTY
     return raw_data if raw_data else None
 
 
@@ -407,17 +393,16 @@ def make_fd_nonblocking(fd):
 def serial_to_pty(serial_dev, master_fd):
     """
     Reads data from the serial device, filters it, and writes to the PTY.
-    Uses a buffer to handle partial lines.
     """
     buffer = ""
     while not shutdown_event.is_set():
-        # If the device is closed externally, stop
+        # if device not open, break
         if not serial_dev.is_open:
             break
         try:
             raw_bytes = serial_dev.read(1024)
             if not raw_bytes:
-                # No data; avoid busy loop
+                # no data - avoid busy loop
                 time.sleep(0.01)
                 continue
 
@@ -440,12 +425,12 @@ def serial_to_pty(serial_dev, master_fd):
                             #print("[serial_to_pty] Warning: PTY buffer full, discarding output.")
                             pass
 
-            # The last part might be a partial line
+            # last part might be a partial line
             buffer = lines[-1]
 
         except serial.SerialException as e:
             print(f"[serial_to_pty] Serial device error: {e}")
-            # Close the device so monitor_serial_connection can reconnect
+            # close the device so monitor_serial_connection can reconnect
             try:
                 serial_dev.close()
             except:
@@ -553,7 +538,7 @@ def run_web_interface():
 
 def write_pty_info(slave_name):
     """
-    Writes the PTY slave name to a file for reuse by other scripts.
+    Writes the PTY slave name to a file.
     """
     try:
         with open(PTY_INFO_FILE, "w") as f:
