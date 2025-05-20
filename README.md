@@ -5,22 +5,22 @@
     * Connection to local network if SSH is used.
 ## Changing SSH ports
 Modify the SSH port on the host to allow connection to container using default SSH port 22. You may skip this step if SSH connection into container is not needed.
-    * **If you are connected via SSH, you will need to reconnect after changing the port and restarting SSH server.**
-    * Open following file with a text editor:
-        ```
-        sudo nano /etc/ssh/sshd_config
-        ```
-    * Find and modify the port line from `#Port 22` to `Port 22222`. This frees up port 22 on host to be used by container ssh server.
-    * You may need to modify firewall settings to allow SSH connections to host machine using port 22222.
-    * Restart the SSH server.
-        ```
-        sudo systemctl restart ssh.service
-        ```
+* **If you are connected via SSH, you will need to reconnect after changing the port and restarting SSH server.**
+* Open following file with a text editor:
+  ```
+  sudo nano /etc/ssh/sshd_config
+  ```
+* Find and modify the port line from `#Port 22` to `Port 22222`. This frees up port 22 on host to be used by container ssh server.
+* You may need to modify firewall settings to allow SSH connections to host machine using port 22222.
+* Restart the SSH server.
+  ```
+  sudo systemctl restart ssh.service
+  ```
 ## Building images
 Navigate to each directory where Dockerfile is present and build the images.
-    ```
-    docker build -t <name> .
-    ```
+```
+docker build -t <name> .
+```
 ## Starting supervisor from scratch:
 Before staring the superivisor, make sure that port 5000 is open, otherwise it is impossible to access the web interface.
 1) Install the [Docker engine using the apt repository](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository).
