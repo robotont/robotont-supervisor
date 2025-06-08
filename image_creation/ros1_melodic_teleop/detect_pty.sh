@@ -16,7 +16,7 @@ OVERRIDE_FILE=${OVERRIDE_FILE:-docker-compose.override.yml}
 #update the docker-compose.override.yml with the detected PTY
 cat > "$OVERRIDE_FILE" <<EOF
 services:
-  ros2_robotont_driver:
+  ros1_melodic_teleop:
     volumes:
       - "${PTY}:/dev/ttyACM0"
 EOF
